@@ -6,7 +6,7 @@ from trezor.messages.MessageSignature import MessageSignature
 from apps.common.paths import validate_path
 from apps.common.signverify import message_digest, require_confirm_sign_message
 
-from .addresses import get_address, validate_full_path
+from .addresses import get_address
 from .keychain import with_keychain
 
 if False:
@@ -27,13 +27,11 @@ async def sign_message(
     await require_confirm_sign_message(ctx, coin.coin_shortcut, message)
     await validate_path(
         ctx,
-        validate_full_path,
         keychain,
         msg.address_n,
-        coin.curve_name,
-        coin=coin,
-        script_type=msg.script_type,
-        validate_script_type=False,
+        # validate_input_script_type(
+        #     msg.address_n, coin, msg.script_type, multisig=False
+        # ),
     )
 
     node = keychain.derive(address_n)
