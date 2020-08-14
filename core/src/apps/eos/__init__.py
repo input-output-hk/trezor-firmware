@@ -1,8 +1,11 @@
 from trezor import wire
 from trezor.messages import MessageType
 
+from apps.common.paths import PATTERN_SEP5_COMPAT
+
 CURVE = "secp256k1"
 SLIP44_ID = 194
+PATTERN = PATTERN_SEP5_COMPAT
 
 
 def boot() -> None:
