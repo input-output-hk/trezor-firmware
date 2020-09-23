@@ -6,7 +6,7 @@ from apps.common.keychain import get_keychain
 from . import CURVE, networks
 
 if False:
-    from typing import Callable
+    from typing import Callable, Iterable
     from typing_extensions import Protocol
 
     from protobuf import MessageType
@@ -25,29 +25,31 @@ if False:
 # iterate the address index i. Therefore for compatibility reasons we use
 # the same scheme: 44'/60'/0'/0/i and only the i is being iterated.
 
-PATTERN_ADDRESS = "m/44'/coin_type'/0'/0/address_index"
-PATTERN_PUBKEY = "m/44'/coin_type'/0'/*"
+PATTERN_ADDRESS_COMPAT = "m/44'/coin_type'/0'/0/address_index"
+PATTERN_PUBKEY = "m/44'/coin_type'/account'/*"
+
+PATTERNS_ADDRESS = (PATTERN_ADDRESS_COMPAT, paths.PATTERN_SEP5)
 
 
-def _schema_from_address_n(
-    pattern: str, address_n: paths.Bip32Path
-) -> paths.PathSchema:
+def _schemas_from_address_n(
+    patterns: Iterable[str], address_n: paths.Bip32Path
+) -> Iterable[paths.PathSchema]:
     if len(address_n) < 2:
-        return paths.SCHEMA_NO_MATCH
+        return ()
 
     slip44_hardened = address_n[1]
     if slip44_hardened not in networks.all_slip44_ids_hardened():
-        return paths.SCHEMA_NO_MATCH
+        return ()
 
     if not slip44_hardened & HARDENED:
-        return paths.SCHEMA_ANY_PATH
+        return ()
 
     slip44_id = slip44_hardened - HARDENED
-    return paths.PathSchema(pattern, slip44_id)
+    return (paths.PathSchema(pattern, slip44_id) for pattern in patterns)
 
 
 def with_keychain_from_path(
-    pattern: str,
+    *patterns: str,
 ) -> Callable[
     [HandlerWithKeychain[MsgWithAddressN, MsgOut]], Handler[MsgWithAddressN, MsgOut]
 ]:
@@ -55,8 +57,8 @@ def with_keychain_from_path(
         func: HandlerWithKeychain[MsgWithAddressN, MsgOut]
     ) -> Handler[MsgWithAddressN, MsgOut]:
         async def wrapper(ctx: wire.Context, msg: MsgWithAddressN) -> MsgOut:
-            schema = _schema_from_address_n(pattern, msg.address_n)
-            keychain = await get_keychain(ctx, CURVE, [schema])
+            schemas = _schemas_from_address_n(patterns, msg.address_n)
+            keychain = await get_keychain(ctx, CURVE, schemas)
             with keychain:
                 return await func(ctx, msg, keychain)
 
@@ -65,18 +67,18 @@ def with_keychain_from_path(
     return decorator
 
 
-def _schema_from_chain_id(msg: EthereumSignTx) -> paths.PathSchema:
+def _schemas_from_chain_id(msg: EthereumSignTx) -> Iterable[paths.PathSchema]:
     if msg.chain_id is None:
-        return _schema_from_address_n(PATTERN_ADDRESS, msg.address_n)
+        return _schemas_from_address_n(PATTERNS_ADDRESS, msg.address_n)
 
     info = networks.by_chain_id(msg.chain_id)
     if info is None:
-        return paths.SCHEMA_NO_MATCH
+        return ()
 
     slip44_id = info.slip44
     if networks.is_wanchain(msg.chain_id, msg.tx_type):
         slip44_id = networks.SLIP44_WANCHAIN
-    return paths.PathSchema(PATTERN_ADDRESS, slip44_id)
+    return (paths.PathSchema(pattern, slip44_id) for pattern in PATTERNS_ADDRESS)
 
 
 def with_keychain_from_chain_id(
@@ -84,8 +86,8 @@ def with_keychain_from_chain_id(
 ) -> Handler[EthereumSignTx, MsgOut]:
     # this is only for SignTx, and only PATTERN_ADDRESS is allowed
     async def wrapper(ctx: wire.Context, msg: EthereumSignTx) -> MsgOut:
-        schema = _schema_from_chain_id(msg)
-        keychain = await get_keychain(ctx, CURVE, [schema])
+        schemas = _schemas_from_chain_id(msg)
+        keychain = await get_keychain(ctx, CURVE, schemas)
         with keychain:
             return await func(ctx, msg, keychain)
 
