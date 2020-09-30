@@ -133,3 +133,46 @@ class TxInfo(TxInfoBase):
         # is used to ensure that the inputs streamed for verification in Step 3 are
         # the same as those in Step 1.
         self.h_inputs = None  # type: Optional[bytes]
+
+
+# Used to keep track of any original transactions which are being replaced by the current transaction.
+class OriginalTxInfo(TxInfoBase):
+    def __init__(self, signer: Signer, tx: PrevTx, orig_hash: bytes) -> None:
+        super().__init__(signer)
+        self.tx = tx
+        self.signer = signer
+        self.orig_hash = orig_hash
+
+        # The current index when iterating over inputs or outputs.
+        self.index = 0
+
+        # Transaction hasher to compute the TXID.
+        self.h_tx = signer.create_hash_writer()
+        signer.write_tx_header(self.h_tx, tx, witness_marker=False)
+        writers.write_bitcoin_varint(self.h_tx, tx.inputs_count)
+
+        # The index of the input which will be used for verification.
+        self.verification_index = None  # type: Optional[int]
+
+    def add_input(self, txi: TxInput) -> None:
+        super().add_input(txi)
+        self.signer.write_tx_input(self.h_tx, txi, txi.script_sig or bytes())
+
+        # For verification use the first input that specifies address_n.
+        if self.verification_index is None and txi.address_n:
+            self.verification_index = self.index
+
+    def add_output(self, txo: TxOutput, script_pubkey: bytes) -> None:
+        super().add_output(txo, script_pubkey)
+
+        if self.index == 0:
+            writers.write_bitcoin_varint(self.h_tx, self.tx.outputs_count)
+
+        self.signer.write_tx_output(self.h_tx, txo, script_pubkey)
+
+    async def finalize_tx_hash(self) -> None:
+        await self.signer.write_prev_tx_footer(self.h_tx, self.tx, self.orig_hash)
+        if self.orig_hash != writers.get_tx_hash(
+            self.h_tx, double=self.signer.coin.sign_hash_double, reverse=True
+        ):
+            raise wire.ProcessError("Invalid original TXID.")
