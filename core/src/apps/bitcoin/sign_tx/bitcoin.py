@@ -307,6 +307,11 @@ class Bitcoin:
         if script_pubkey != self.output_derive_script(orig_txo):
             raise wire.ProcessError("Not an original output.")
 
+        if self.tx_info.output_is_change(txo) and not orig.output_is_change(orig_txo):
+            raise wire.ProcessError(
+                "Original output is missing change-output parameters."
+            )
+
         orig.add_output(orig_txo, script_pubkey)
 
         if orig.output_is_change(orig_txo):
