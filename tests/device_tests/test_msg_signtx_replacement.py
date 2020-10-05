@@ -17,6 +17,7 @@
 import pytest
 
 from trezorlib import btc, messages
+from trezorlib.exceptions import TrezorFailure
 from trezorlib.tools import parse_path
 
 from ..tx_cache import TxCache
@@ -537,3 +538,78 @@ def test_tx_meld(client):
         serialized_tx.hex()
         == "01000000000104d64ae26dceee1e309bed0821f39275b5f6e65d0072f8e23747ae76006967765e0100000017160014039ba06270e6c6c1ad4e6940515aa5cdbad33f9effffffff57b4cb6156c63a8d6b834e236a21edf9d0f11fdd2fd0f9b28248328e24b773660000000017160014adbbadefe594e9e4bfccb9c699ae5d4f18716772ffffffff35ac1adc9e0cf408013090c52527d3cf9468d51e1a6c8408f5ed673eff41aaef0000000017160014209297fb46272a0b7e05139440dbd39daea3e25affffffff0b03833dd525dae7f7ed1455f386fc7899737a1cc3f538c7c4efbc7be08477920000000017160014681ea49259abb892460bf3373e8a0b43d877fa18ffffffff0300e1f505000000001976a914548cb80e45b1d36312fe0cb075e5e337e3c54cef88ac40420f000000000017a9142369da13fee80c9d7fd8043bf1275c04deb360e687590d5d2c0000000017a91458b53ea7f832e8f096e896b8713a8c6df0e892ca870247304402205b4b304cb5a23cd3b73aa586c983cbadefc3fcbcb8fb33684037b17a818726c002202a3f529183eebf2f06d041b18d379579c22d908be31060752179f01d125ff020012103bb0e339d7495b1f355c49d385b79343e52e68d99de2fe1f7f476c465c9ccd167024730440220666ebf2c146d4a369971ec1d5b69fce2f3b8e2c0ba689e6077ebed513f91dd760220200e203355156e23abf5b536ac174df4109985feddf86ab065c12f0da8339d6a012102a52d8cf5a89c284bacff90a3d7c30a0166e0074ca3fc385f3efce638c50493b30247304402207d6331026626fc133813ea672147c95feac29a3d7deefb49ef1d0194e061d53802207e4c3a3b8f3c2e11845684d74a5f1d8395da0a8e65e18c7f72155aac82be648e012103c2c2e65556ca4b7371549324b99390725493c8a6792e093a0bdcbb3e2d7df4ab02473044022047f95a95ea8cac78f057e15e37ac5cebd6abcf50d87e5509d30c730cb0f7e89f02201d861acb267c0bc100cac99cad42b067a39614602eef5f9f791c1875f24dd0de0121028cbc37e1816a23086fa738c8415def477e813e20f484dbbd6f5a33a37c32225100000000"
     )
+
+
+@pytest.mark.skip_t1
+@pytest.mark.skip_ui
+def test_attack_steal_change(client):
+    # Attempt to steal amount equivalent to the change in the original transaction by
+    # hiding the fact that an output in the original transaction is a change-output.
+
+    # Original input.
+    inp1 = messages.TxInputType(
+        address_n=parse_path("84h/1h/0h/0/0"),
+        amount=100000,
+        script_type=messages.InputScriptType.SPENDWITNESS,
+        prev_hash=TXHASH_e4b5b2,
+        prev_index=0,
+        orig_hash=TXHASH_65b768,
+        orig_index=0,
+        sequence=1516634,
+    )
+
+    # New input for the attacker to steal from.
+    inp2 = messages.TxInputType(
+        address_n=parse_path("84h/1h/0h/1/1"),
+        amount=19899859,
+        script_type=messages.InputScriptType.SPENDWITNESS,
+        prev_hash=TXHASH_70f987,
+        prev_index=1,
+    )
+
+    # Original output.
+    out1 = messages.TxOutputType(
+        address="tb1qldlynaqp0hy4zc2aag3pkenzvxy65saesxw3wd",
+        amount=10000,
+        script_type=messages.OutputScriptType.PAYTOWITNESS,
+        orig_hash=TXHASH_65b768,
+        orig_index=0,
+    )
+
+    # Original change was 89859. We bump the fee from 141 to 200 and
+    # attacker gives back what he can't steal.
+    out2 = messages.TxOutputType(
+        address_n=parse_path("84h/1h/0h/1/2"),
+        amount=100000 - 10000 - 200 + (19899859 - 89859),
+        script_type=messages.OutputScriptType.PAYTOWITNESS,
+        orig_hash=TXHASH_65b768,
+        orig_index=1,
+    )
+
+    # Attacker's new output.
+    out3 = messages.TxOutputType(
+        address="tb1q694ccp5qcc0udmfwgp692u2s2hjpq5h407urtu",
+        amount=89859,
+    )
+
+    # Attacker hides the fact that second output of 65b768 is a change-output.
+    class AttackerTxCache:
+        def __getitem__(self, key):
+            tx = TX_CACHE_TESTNET[key]
+            if key == TXHASH_65b768:
+                tx.outputs[1].address_n = None
+                tx.outputs[1].address = "tb1qr5p6f5sk09sms57ket074vywfymuthlgud7xyx"
+                tx.outputs[1].script_type = messages.OutputScriptType.PAYTOADDRESS
+            return tx
+
+    with pytest.raises(
+        TrezorFailure, match="Original output is missing change-output parameters"
+    ):
+        btc.sign_tx(
+            client,
+            "Testnet",
+            [inp1, inp2],
+            [out1, out2, out3],
+            lock_time=1516634,
+            prev_txes=AttackerTxCache(),
+        )
