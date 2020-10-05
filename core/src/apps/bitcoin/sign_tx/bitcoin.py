@@ -136,9 +136,7 @@ class Bitcoin:
             txo = await helpers.request_tx_output(self.tx_req, i, self.coin)
             script_pubkey = self.output_derive_script(txo)
             if txo.orig_hash:
-                orig_txo = await self.get_original_output(txo)
-                if script_pubkey != self.output_derive_script(orig_txo):
-                    raise wire.ProcessError("Not an original output.")
+                orig_txo = await self.get_original_output(txo, script_pubkey)
             else:
                 orig_txo = None  # type: ignore
             await self.approve_output(txo, script_pubkey, orig_txo)
@@ -281,7 +279,9 @@ class Bitcoin:
 
             orig.index += 1
 
-    async def get_original_output(self, txo: TxOutput) -> TxOutput:
+    async def get_original_output(
+        self, txo: TxOutput, script_pubkey: bytes
+    ) -> TxOutput:
         assert txo.orig_hash is not None
         assert txo.orig_index is not None
 
@@ -303,7 +303,11 @@ class Bitcoin:
         orig_txo = await helpers.request_tx_output(
             self.tx_req, orig.index, self.coin, txo.orig_hash
         )
-        orig.add_output(orig_txo, self.output_derive_script(orig_txo))
+
+        if script_pubkey != self.output_derive_script(orig_txo):
+            raise wire.ProcessError("Not an original output.")
+
+        orig.add_output(orig_txo, script_pubkey)
 
         if orig.output_is_change(orig_txo):
             self.approver.add_orig_change_output(orig_txo)
