@@ -45,6 +45,6 @@ class TxOutputType(p.MessageType):
             4: ('script_type', p.EnumType("OutputScriptType", (0, 1, 2, 3, 4, 5)), 0),  # default=PAYTOADDRESS
             5: ('multisig', MultisigRedeemScriptType, None),
             6: ('op_return_data', p.BytesType, None),
-            10: ('orig_hash', p.BytesType, None),
-            11: ('orig_index', p.UVarintType, None),
+            10: ('orig_hash', p.BytesType, p.FLAG_EXPERIMENTAL),
+            11: ('orig_index', p.UVarintType, p.FLAG_EXPERIMENTAL),
         }

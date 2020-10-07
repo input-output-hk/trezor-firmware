@@ -63,6 +63,6 @@ class TxInputType(p.MessageType):
             13: ('witness', p.BytesType, None),
             14: ('ownership_proof', p.BytesType, None),
             15: ('commitment_data', p.BytesType, None),
-            16: ('orig_hash', p.BytesType, None),
-            17: ('orig_index', p.UVarintType, None),
+            16: ('orig_hash', p.BytesType, p.FLAG_EXPERIMENTAL),
+            17: ('orig_index', p.UVarintType, p.FLAG_EXPERIMENTAL),
         }
